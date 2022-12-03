@@ -44,31 +44,26 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	for _, event := range events {
 		fmt.Printf("handleWebhook event: %+v\n", event)
 
-		var availableChars = 6000
 		embed := &discordgo.MessageEmbed{}
 
 		// Take embed title from the event message
-		availableChars -= len(event.Message)
 		embed.Title = event.Message
 
 		// Add the event data to the embed description
 		embed.Description = ""
 
 		for key, value := range event.Data {
-			availableChars -= len(key) + len(value) + 5
-			embed.Description += fmt.Sprintf("**%s**: %s", key, value)
+			embed.Description += fmt.Sprintf("**%s**: %s\n", key, value)
 		}
 
 		// Add the event timestamp to the embed timestamp
-		availableChars -= len(embed.Timestamp)
 		embed.Timestamp = event.Timestamp.Format(time.RFC3339)
 
 		// Add the event tailnet to the embed fields
-		availableChars -= len(event.Tailnet)
 		embed.Fields = []*discordgo.MessageEmbedField{
 			{
-				Name:  "Message",
-				Value: event.Message,
+				Name:  "Type",
+				Value: event.Type,
 			},
 			{
 				Name:  "Tailnet",
