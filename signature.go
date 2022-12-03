@@ -23,7 +23,6 @@ import (
 
 const (
 	currentVersion = "v1"
-	secret         = "tskey-webhook-xxxxx" // sensitive, here just as an example
 )
 
 var (

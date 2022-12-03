@@ -5,19 +5,24 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
+	"time"
 
-	"github.com/google/uuid"
+	"github.com/bwmarrin/discordgo"
+	"github.com/joho/godotenv"
 )
 
+var sess *discordgo.Session
+
+func init() {
+	godotenv.Load()
+}
+
 type incomingWebhook struct {
-	Timestamp string            `json:"timestamp"`
+	Timestamp time.Time         `json:"timestamp"`
 	Version   int               `json:"version"`
 	Type      string            `json:"type"`
 	Tailnet   string            `json:"tailnet"`
@@ -25,126 +30,8 @@ type incomingWebhook struct {
 	Data      map[string]string `json:"data"`
 }
 
-// https://learn.microsoft.com/en-us/outlook/actionable-messages/message-card-reference
-type teamsWebhook struct {
-	Type          string `json:"@type"`
-	Context       string `json:"@context"`
-	CorrelationId string `json:"correlationId"`
-	Text          string `json:"text"`
-	Summary       string `json:"summary"`
-	ThemeColor    string `json:"themeColor"`
-	Title         string `json:"title"`
-}
-
-func sendTeamsWebhook(orig incomingWebhook) {
-	webhookUrl := os.Getenv("TEAMS_WEBHOOK_URL")
-	if webhookUrl == "" {
-		// not configured
-		return
-	}
-
-	teams := teamsWebhook{
-		Type:          "MessageCard",
-		Context:       "https://schema.org/extensions",
-		CorrelationId: uuid.NewString(),
-		Summary:       orig.Message,
-		ThemeColor:    "c0c0c0",
-		Title:         orig.Message,
-	}
-
-	buf := new(bytes.Buffer)
-	for key, val := range orig.Data {
-		fmt.Fprintf(buf, "%s=\"%s\"\n", key, val)
-	}
-	teams.Text = buf.String()
-
-	body, err := json.Marshal(teams)
-	if err != nil {
-		fmt.Printf("sendTeamsWebhook json.Marshall failed: %v\n", err)
-		return
-	}
-
-	req, err := http.NewRequest(http.MethodPost, webhookUrl, bytes.NewBuffer(body))
-	if err != nil {
-		fmt.Printf("sendTeamsWebhook http.NewRequest failed: %v\n", err)
-		return
-	}
-
-	req.Header.Add("Content-Type", "application/json")
-
-	client := &http.Client{}
-	_, err = client.Do(req)
-	if err != nil {
-		fmt.Printf("sendTeamsWebhook client.Do failed: %v\n", err)
-		return
-	}
-
-	return
-}
-
-// https://discord.com/developers/docs/resources/webhook
-type discordWebhook struct {
-	ThreadName string `json:"thread_name"`
-	Content    string `json:"content"`
-}
-
-func sendDiscordWebhook(orig incomingWebhook) {
-	webhookUrl := os.Getenv("DISCORD_WEBHOOK_URL")
-	if webhookUrl == "" {
-		// not configured
-		return
-	}
-
-	discord := discordWebhook{
-		ThreadName: orig.Message,
-	}
-
-	buf := new(bytes.Buffer)
-	for key, val := range orig.Data {
-		fmt.Fprintf(buf, "%s=\"%s\"\n", key, val)
-	}
-	discord.Content = buf.String()
-	if len(discord.Content) >= 2000 {
-		r := []rune(discord.Content)
-		trunc := r[:1990]
-		discord.Content = string(trunc) + "\n...\n"
-	} else if len(discord.Content) == 0 {
-		discord.Content = orig.Message
-	}
-
-	body, err := json.Marshal(discord)
-	if err != nil {
-		fmt.Printf("sendDiscordWebhook json.Marshall failed: %v\n", err)
-		return
-	}
-
-	u, err := url.Parse(webhookUrl)
-	if err != nil {
-		fmt.Printf("sendDiscordWebhook url.Parse failed: %v\n", err)
-		return
-	}
-	query := u.Query()
-	query.Set("wait", "true")
-	u.RawQuery = query.Encode()
-	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewBuffer(body))
-	if err != nil {
-		fmt.Printf("sendDiscordWebhook http.NewRequest failed: %v\n", err)
-		return
-	}
-
-	req.Header.Add("Content-Type", "application/json")
-
-	client := &http.Client{}
-	_, err = client.Do(req)
-	if err != nil {
-		fmt.Printf("sendDiscordWebhook client.Do failed: %v\n", err)
-		return
-	}
-
-	return
-}
-
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Received webhook")
 	secret := os.Getenv("TS_WEBHOOK_SECRET")
 	events, err := verifyWebhookSignature(r, secret)
 	if err != nil {
@@ -155,18 +42,70 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("handleWebhook received %d events\n", len(events))
 	for _, event := range events {
-		sendTeamsWebhook(event)
-		sendDiscordWebhook(event)
+		fmt.Printf("handleWebhook event: %+v\n", event)
+
+		var availableChars = 6000
+		embed := &discordgo.MessageEmbed{}
+
+		// Take embed title from the event message
+		availableChars -= len(event.Message)
+		embed.Title = event.Message
+
+		// Add the event data to the embed description
+		embed.Description = ""
+
+		for key, value := range event.Data {
+			availableChars -= len(key) + len(value) + 5
+			embed.Description += fmt.Sprintf("**%s**: %s", key, value)
+		}
+
+		// Add the event timestamp to the embed timestamp
+		availableChars -= len(embed.Timestamp)
+		embed.Timestamp = event.Timestamp.Format(time.RFC3339)
+
+		// Add the event tailnet to the embed fields
+		availableChars -= len(event.Tailnet)
+		embed.Fields = []*discordgo.MessageEmbedField{
+			{
+				Name:  "Message",
+				Value: event.Message,
+			},
+			{
+				Name:  "Tailnet",
+				Value: event.Tailnet,
+			},
+		}
+
+		// Send the embed to the Discord channel
+		_, err := sess.ChannelMessageSendEmbed(os.Getenv("DISCORD_CHANNEL_ID"), embed)
+
+		if err != nil {
+			fmt.Printf("handleWebhook ChannelMessageSendEmbed: %v\n", err)
+		}
 	}
 }
 
 func main() {
+	var err error
+	sess, err = discordgo.New("Bot " + os.Getenv("DISCORD_TOKEN"))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Open a WS connection to Discord and do an identify so we can send messages.
+	err = sess.Open()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		log.Fatal("PORT environment variable not set")
 	}
 
 	log.Printf("Listening for webhooks on port %s...\n", port)
-	http.HandleFunc("/webhook", handleWebhook)
+	http.HandleFunc("/", handleWebhook)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
