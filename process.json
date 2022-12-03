@@ -1,0 +1,7 @@
+[
+        {
+                "name": "TSWeb",
+                "script": "unbuffer ./ts-webhook-adapter",
+                "cwd": "/root/ts-webhook-adapter"
+        }
+]
