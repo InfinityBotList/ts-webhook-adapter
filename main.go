@@ -78,6 +78,8 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("handleWebhook ChannelMessageSendEmbed: %v\n", err)
 		}
 	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func main() {
