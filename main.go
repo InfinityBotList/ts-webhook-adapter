@@ -22,12 +22,12 @@ func init() {
 }
 
 type incomingWebhook struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Version   int               `json:"version"`
-	Type      string            `json:"type"`
-	Tailnet   string            `json:"tailnet"`
-	Message   string            `json:"message"`
-	Data      map[string]string `json:"data"`
+	Timestamp time.Time      `json:"timestamp"`
+	Version   int            `json:"version"`
+	Type      string         `json:"type"`
+	Tailnet   string         `json:"tailnet"`
+	Message   string         `json:"message"`
+	Data      map[string]any `json:"data"`
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
